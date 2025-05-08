@@ -1,0 +1,6 @@
+/.idea
+/.venv
+/runs
+/yolo11n.pt
+/yolov5s.pt
+/yolov5su.pt

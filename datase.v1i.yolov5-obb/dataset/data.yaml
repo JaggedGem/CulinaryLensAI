@@ -1,0 +1,8 @@
+path: C:/Users/Bogdan/Desktop/beepo/datase.v1i.yolov5-obb/dataset
+
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 6
+names: ['Onion', 'beef', 'chicken', 'eggs', 'potato', 'radish']
