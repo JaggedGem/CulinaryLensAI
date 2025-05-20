@@ -1,268 +1,156 @@
-# Food Ingredient Detection with YOLOv5
+# Optimized Food-101 Classification System
 
-A comprehensive system for training YOLOv5 models to detect food ingredients (Onion, Beef, Chicken, Eggs, Potato, Radish) using advanced training techniques and dataset augmentation.
+This project provides a complete, optimized system for training high-accuracy deep learning models on the Food-101 dataset. The system features CUDA acceleration, mixed-precision training, automatic resume capabilities, and real-time visual indicators of training progress.
 
-## Table of Contents
+## Features
 
-1. [Setup and Installation](#setup-and-installation)
-2. [Dataset Preparation](#dataset-preparation)
-3. [Training Process](#training-process)
-4. [Advanced Training](#advanced-training)
-5. [Continuing Training](#continuing-training)
-6. [Evaluation](#evaluation)
-7. [Inference](#inference)
-8. [Troubleshooting](#troubleshooting)
+- **High-Performance Training**:
+  - CUDA acceleration with mixed-precision
+  - Optimized data loading and preprocessing
+  - Advanced data augmentation strategies
+  - Support for multiple model architectures
+  - Learning rate schedulers and adaptive optimizers
 
-## Setup and Installation
+- **Resilient Training Process**:
+  - Automatically save progress at regular intervals
+  - Gracefully handle interruptions (Ctrl+C) with checkpoint saving
+  - Resume training from where it left off
+  - Real-time visual progress indicators
+
+- **Visual Monitoring**:
+  - TensorBoard integration for real-time monitoring
+  - Training history plots automatically generated
+  - Detailed performance metrics and visualizations
+
+- **Interactive Demo**:
+  - User-friendly web interface for testing the model
+  - Real-time predictions with confidence scores
+  - Camera integration for live testing
+
+## Getting Started
 
 ### Prerequisites
 
-- Python 3.8+ 
-- CUDA-compatible GPU (6GB+ VRAM recommended)
-- 16GB+ RAM
-- Windows, Linux or macOS
+- Python 3.8 or higher
+- CUDA-compatible GPU (recommended)
+- 8GB+ RAM
 
 ### Installation
 
 1. Clone this repository:
-```bash
-git clone https://github.com/JaggedGem/CulinaryLensAI.git
-cd CulinaryLensAI
-```
+   ```
+   git clone https://github.com/yourusername/food101-classification.git
+   cd food101-classification
+   ```
 
 2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-This will install:
-- PyTorch with CUDA support
-- Ultralytics YOLOv5
-- OpenCV and other required packages
-
-## Dataset Preparation
-
-The original dataset uses YOLOv5-OBB (Oriented Bounding Box) format, which needs to be converted to standard YOLO format.
-
-### Step 1: Convert OBB Labels to YOLO Format
-
-```bash
-python convert_labels.py
-```
-
-This converts the OBB format labels (x1,y1,x2,y2,x3,y3,x4,y4,class) to standard YOLO format (class,x,y,width,height).
-
-### Dataset Structure
-
-After conversion, your dataset should have this structure:
-```
-datase.v1i.yolov5-obb/
-├── dataset/
-│   ├── data.yaml       # Dataset configuration
-│   ├── train/
-│   │   ├── images/     # Training images
-│   │   └── labels/     # Converted YOLO labels
-│   ├── valid/
-│   │   ├── images/     # Validation images
-│   │   └── labels/     # Validation labels
-│   └── test/
-│       ├── images/     # Test images
-│       └── labels/     # Test labels
-```
-
-## Training Process
-
-### Basic Training
-
-The simplest way to start training:
-
-```bash
-python main.py
-```
-
-This will:
-1. Check required dependencies
-2. Convert any remaining OBB labels to YOLO format
-3. Train a YOLOv5 model for 100 epochs
-4. Save results to `runs/train/exp/`
-
-### Training Parameters
-
-The basic training uses:
-- YOLOv5s or YOLOv5su model (auto-selects best available)
-- 640×640 image size
-- Batch size of 16
-- SGD optimizer
-- 100 epochs
-
-## Advanced Training
-
-For better performance, especially on challenging classes like beef, potato, and radish, use the advanced training pipeline:
-
-### Step 1: Balance Dataset with Synthetic Augmentations
-
-```bash
-python balance_dataset.py
-```
-
-This creates synthetic training examples for underrepresented classes, improving model performance on these classes.
-
-### Step 2: Train with Optimized Parameters
-
-```bash
-python train_optimized.py --balance --target-count 200 --epochs 300
-```
-
-Parameters:
-- `--balance`: Enables dataset balancing
-- `--target-count`: Sets target count per class (default: 200)
-- `--epochs`: Number of training epochs (default: 300)
-- `--batch-size`: Batch size (default: 16)
-- `--img-size`: Input image size (default: 640)
-- `--model`: Model to use - auto, yolov5s, yolov5m, yolov5l (default: auto)
-
-This enhanced training uses:
-- Focal loss for better class imbalance handling
-- AdamW optimizer with cosine learning rate scheduling
-- Advanced data augmentation techniques
-- Multi-scale training
-- Better hyperparameters for small object detection
-
-## Continuing Training
-
-If you've already trained a model and want to improve it further:
-
-```bash
-python resume_training.py --weights runs/train/exp/weights/best.pt --epochs 100
-```
-
-To focus specifically on improving weak classes:
-
-```bash
-python resume_training.py --weights runs/train/exp/weights/best.pt --epochs 100 --focus-classes "beef,potato,radish"
-```
-
-Parameters:
-- `--weights`: Path to pretrained weights (required)
-- `--data`: Path to data.yaml file
-- `--epochs`: Additional training epochs
-- `--focus-classes`: Comma-separated list of classes to focus on
-- `--batch-size`: Batch size for training
-- `--img-size`: Input image size
-
-### Combining with Balanced Dataset
-
-For best results, combine continued training with the balanced dataset:
-
-```bash
-python resume_training.py --weights runs/train/exp/weights/best.pt --data datase.v1i.yolov5-obb/dataset/data_augmented.yaml --epochs 100 --focus-classes "beef,potato,radish"
-```
-
-## Evaluation
-
-The training scripts automatically evaluate the model on the test set, but you can also evaluate separately:
-
-```bash
-# Evaluate the basic model
-python -c "from ultralytics import YOLO; model = YOLO('runs/train/exp/weights/best.pt'); model.val(data='datase.v1i.yolov5-obb/dataset/data.yaml')"
-
-# Evaluate the optimized model
-python -c "from ultralytics import YOLO; model = YOLO('runs/optimized/exp/weights/best.pt'); model.val(data='datase.v1i.yolov5-obb/dataset/data.yaml')"
-```
-
-## Inference
-
-To run inference on new images or videos:
-
-```bash
-# On an image
-python -c "from ultralytics import YOLO; model = YOLO('runs/optimized/exp/weights/best.pt'); model.predict('path/to/image.jpg', save=True, conf=0.25)"
-
-# On a video
-python -c "from ultralytics import YOLO; model = YOLO('runs/optimized/exp/weights/best.pt'); model.predict('path/to/video.mp4', save=True, conf=0.25)"
-```
-
-Results will be saved to the `runs/predict` directory.
-
-## Complete Training Workflow
-
-Here's the recommended full workflow:
-
-1. **Initial Setup**:
-   ```bash
+   ```
    pip install -r requirements.txt
    ```
 
-2. **Label Conversion**:
-   ```bash
-   python convert_labels.py
-   ```
+### Training the Model
 
-3. **Basic Training** (to get a baseline):
-   ```bash
-   python main.py
-   ```
+Run the optimized training pipeline:
 
-4. **Dataset Balancing**:
-   ```bash
-   python balance_dataset.py
-   ```
+```bash
+python train_optimized.py
+```
 
-5. **Advanced Training**:
-   ```bash
-   python train_optimized.py --balance --epochs 300
-   ```
+This will:
+1. Download and prepare the Food-101 dataset (~5GB)
+2. Train an optimized EfficientNet-B0 model with CUDA acceleration
+3. Save checkpoints, training history, and evaluation metrics
+4. Create a ready-to-use model for inference
 
-6. **Fine-tuning Weak Classes**:
-   ```bash
-   python resume_training.py --weights runs/optimized/exp/weights/best.pt --epochs 100 --focus-classes "beef,potato,radish"
-   ```
+### Training Options
 
-7. **Final Evaluation**:
-   ```bash
-   python -c "from ultralytics import YOLO; model = YOLO('runs/continued/exp/weights/best.pt'); model.val(data='datase.v1i.yolov5-obb/dataset/data.yaml')"
-   ```
+- `--model`: Model architecture (choices: resnet18, resnet34, resnet50, densenet121, efficientnet_b0, efficientnet_b2)
+- `--batch-size`: Batch size for training
+- `--epochs`: Number of training epochs
+- `--lr`: Learning rate
+- `--device`: Device to use (cuda or cpu)
+- `--skip-dataset`: Skip dataset preparation
+- `--auto-resume`: Automatically resume from the latest checkpoint (default: True)
 
-## Troubleshooting
+Example with custom settings:
+```bash
+python train_optimized.py --model efficientnet_b2 --batch-size 32 --epochs 100 --lr 0.0003
+```
 
-### CUDA Issues
-- If you encounter CUDA errors, make sure your PyTorch installation matches your CUDA version:
-  ```bash
-  pip uninstall torch torchvision -y
-  pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu121
-  ```
+### Resuming Interrupted Training
 
-### Memory Issues
-- If you get CUDA out of memory errors, reduce batch size:
-  ```bash
-  python train_optimized.py --batch-size 8 --balance
-  ```
+If training is interrupted (power failure, Ctrl+C, etc.), you can easily resume:
 
-### Dataset Issues
-- Make sure labels and images correspond correctly
-- Check data.yaml path configuration
-- Verify class names match between data.yaml and labels
+```bash
+python resume_training.py
+```
 
-### Improving Poor Performance on Specific Classes
-- Run with class focusing:
-  ```bash
-  python resume_training.py --weights best.pt --focus-classes "problem_class1,problem_class2" --epochs 50
-  ```
-- Increase augmentation for problem classes:
-  ```bash
-  python balance_dataset.py --target-count 300
-  ```
+This will automatically find the latest checkpoint and resume training with the same parameters.
 
-## Expected Results
+To override specific parameters:
+```bash
+python resume_training.py --epochs 200 --lr 0.0001
+```
 
-With the complete training pipeline:
+### Interactive Demo
 
-| Class      | mAP50 (Basic) | mAP50 (Advanced) |
-|------------|---------------|------------------|
-| Onion      | 0.952         | 0.970+           |
-| Eggs       | 0.941         | 0.960+           |
-| Chicken    | 0.581         | 0.800+           |
-| Beef       | 0.087         | 0.450+           |
-| Potato     | 0.227         | 0.600+           |
-| Radish     | 0.056         | 0.450+           |
-| **Overall**| 0.474         | 0.720+           | 
+After training, launch the interactive demo:
+
+```bash
+python food101_demo_app.py
+```
+
+Or with the training script:
+```bash
+python train_optimized.py --skip-training --demo
+```
+
+## Model Performance
+
+With the default settings (EfficientNet-B0, 50 epochs), you can expect:
+- Top-1 accuracy: ~85-87%
+- Top-5 accuracy: ~96-97%
+
+For best accuracy (may take longer to train):
+```bash
+python train_optimized.py --model efficientnet_b2 --batch-size 32 --epochs 100
+```
+
+## Advanced Features
+
+### Mixed Precision Training
+
+Mixed precision training is enabled by default to accelerate training on compatible GPUs while maintaining accuracy.
+
+### Real-time Monitoring
+
+TensorBoard is enabled by default for real-time monitoring of training:
+
+```bash
+tensorboard --logdir ./runs/food101/tensorboard
+```
+
+### Automatic Optimization
+
+The optimized training pipeline includes:
+- Learning rate scheduling (Cosine Annealing by default)
+- Label smoothing for better generalization
+- Dropout regularization
+- Advanced data augmentation
+
+## Visualization and Evaluation
+
+After training completes, you'll find in the output directory:
+- Training history plots
+- Confusion matrix visualization
+- Per-class accuracy analysis
+- Classification reports
+
+## License
+
+This project is licensed under the MIT License.
+
+## Acknowledgments
+
+- The Food-101 dataset is provided by ETH Zurich
+- Based on PyTorch and torchvision frameworks

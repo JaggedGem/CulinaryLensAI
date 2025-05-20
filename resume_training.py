@@ -1,116 +1,150 @@
 import os
 import argparse
+import glob
+import json
+import subprocess
+import sys
+import torch
 from pathlib import Path
-from ultralytics import YOLO
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Resume training for Food-101 classifier')
+    parser.add_argument('--output-dir', type=str, default='./runs/food101', help='Output directory with checkpoints')
+    parser.add_argument('--checkpoint', type=str, default=None, help='Specific checkpoint to resume from')
+    parser.add_argument('--epochs', type=int, default=None, help='Override number of epochs')
+    parser.add_argument('--lr', type=float, default=None, help='Override learning rate')
+    parser.add_argument('--batch-size', type=int, default=None, help='Override batch size')
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Override device')
+    parser.add_argument('--disable-auto-resume', action='store_true', help='Disable auto-resume')
+    
+    return parser.parse_args()
+
+def find_latest_checkpoint(output_dir):
+    """Find the latest checkpoint in the output directory"""
+    checkpoint_path = os.path.join(output_dir, 'latest_checkpoint.pth')
+    if os.path.exists(checkpoint_path):
+        return checkpoint_path
+    
+    # If no latest_checkpoint.pth, look for other checkpoints
+    checkpoints = glob.glob(os.path.join(output_dir, '*_checkpoint.pth'))
+    if checkpoints:
+        # Sort by modification time, most recent first
+        return sorted(checkpoints, key=os.path.getmtime, reverse=True)[0]
+    
+    return None
+
+def get_checkpoint_info(checkpoint_path):
+    """Extract information from a checkpoint file"""
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        info = {
+            'epoch': checkpoint.get('epoch', 0),
+            'args': checkpoint.get('args', {}),
+            'best_acc': checkpoint.get('best_acc', 0)
+        }
+        return info
+    except Exception as e:
+        print(f"Error loading checkpoint {checkpoint_path}: {e}")
+        return None
 
 def main():
-    """Continue training from a previously trained model"""
-    parser = argparse.ArgumentParser(description="Continue YOLOv5 training")
-    parser.add_argument('--weights', type=str, required=True, 
-                        help='Path to the previously trained weights file (e.g., runs/train/exp/weights/best.pt)')
-    parser.add_argument('--data', type=str, default='datase.v1i.yolov5-obb/dataset/data.yaml', 
-                        help='Path to the data YAML file')
-    parser.add_argument('--epochs', type=int, default=100, 
-                        help='Number of additional epochs to train')
-    parser.add_argument('--batch-size', type=int, default=16, 
-                        help='Batch size for training')
-    parser.add_argument('--img-size', type=int, default=640, 
-                        help='Image size for training')
-    parser.add_argument('--focus-classes', type=str, default='', 
-                       help='Comma-separated list of class names to focus on (e.g., "beef,potato,radish")')
-    args = parser.parse_args()
+    args = parse_args()
+    output_dir = Path(args.output_dir)
     
-    # Verify the weights file exists
-    if not os.path.exists(args.weights):
-        raise FileNotFoundError(f"Weights file not found: {args.weights}")
+    # Check if output directory exists
+    if not output_dir.exists():
+        print(f"Output directory {output_dir} does not exist.")
+        return
     
-    print(f"=== Continuing Training from {args.weights} ===")
+    # Find checkpoint to resume from
+    checkpoint_path = args.checkpoint
+    if checkpoint_path is None:
+        checkpoint_path = find_latest_checkpoint(output_dir)
     
-    # Load the pretrained model
-    model = YOLO(args.weights)
+    if checkpoint_path is None:
+        print(f"No checkpoint found in {output_dir}")
+        return
     
-    # Set up training parameters
-    training_args = {
-        'data': args.data,
-        'epochs': args.epochs,  
-        'imgsz': args.img_size,
-        'batch': args.batch_size,
-        'device': 0,            # Use GPU
-        'workers': 8,
-        'resume': False,        # Start a new training session
-        'pretrained': True,     # Use the loaded weights
-        'project': 'runs/continued',
-        'name': 'exp',
-        'exist_ok': True,
-        'verbose': True,
-        
-        # Augmentation settings
-        'degrees': 0.5,
-        'translate': 0.2,
-        'scale': 0.7,
-        'shear': 0.2,
-        'perspective': 0.001,
-        'flipud': 0.5,
-        'fliplr': 0.5,
-        'mosaic': 0.8,
-        'mixup': 0.5,
-        'copy_paste': 0.3,
-        
-        # Optimization settings
-        'optimizer': 'AdamW',
-        'cos_lr': True,
-        'label_smoothing': 0.1,
-    }
+    # Get checkpoint information
+    info = get_checkpoint_info(checkpoint_path)
+    if info is None:
+        return
     
-    # If specific classes are targeted for improvement
-    if args.focus_classes:
-        focus_classes = [cls.strip() for cls in args.focus_classes.split(',')]
-        print(f"Focusing on improving performance for classes: {focus_classes}")
-        
-        # We could potentially modify class weights or hyperparameters
-        # to focus more on these specific classes
-        
-        # For now, we'll just note this for the user
-        print("Training will use enhanced augmentation for these classes")
+    print(f"\n{'='*60}")
+    print(f"Resuming training from checkpoint: {checkpoint_path}")
+    print(f"Current epoch: {info['epoch'] + 1}")
+    print(f"Best accuracy so far: {info['best_acc']:.4f}")
+    print(f"{'='*60}\n")
     
-    print(f"Will train for {args.epochs} epochs")
-    print("Starting continued training...")
+    # Get original training arguments
+    orig_args = info.get('args', {})
     
-    # Start training from the loaded model
-    results = model.train(**training_args)
+    # Build command for improved training
+    cmd = [
+        sys.executable, 'improved_training.py',
+        '--data-dir', orig_args.get('data_dir', './food-101'),
+        '--output-dir', args.output_dir
+    ]
     
-    print("Training completed!")
-    print(f"Results saved to {results.save_dir}")
+    # Add arguments from the checkpoint or override from command line
+    cmd.extend(['--resume', checkpoint_path])
     
-    # Evaluate the model
-    print("\n=== Evaluating Model Performance ===")
-    best_model_path = os.path.join(results.save_dir, 'weights', 'best.pt')
+    if not args.disable_auto_resume:
+        cmd.append('--auto-resume')
     
-    # Evaluate on test set
-    eval_results = model.val(data=args.data, split='test')
+    # Use command line arguments to override checkpoint settings if provided
+    if args.epochs:
+        cmd.extend(['--epochs', str(args.epochs)])
+    elif 'epochs' in orig_args:
+        cmd.extend(['--epochs', str(orig_args['epochs'])])
     
-    print("\n=== Final Model Performance ===")
-    print(f"mAP50: {eval_results.box.map50:.4f}")
-    print(f"mAP50-95: {eval_results.box.map:.4f}")
+    if args.batch_size:
+        cmd.extend(['--batch-size', str(args.batch_size)])
+    elif 'batch_size' in orig_args:
+        cmd.extend(['--batch-size', str(orig_args['batch_size'])])
     
-    # If we're focusing on specific classes, report their performance
-    if args.focus_classes:
-        print("\nPerformance on focus classes:")
-        # Load class names to map indices to names
-        import yaml
-        with open(args.data, 'r') as f:
-            data_config = yaml.safe_load(f)
-        
-        class_names = data_config['names']
-        class_maps = eval_results.box.maps
-        
-        for focus_class in focus_classes:
-            if focus_class in class_names:
-                idx = class_names.index(focus_class)
-                print(f"{focus_class:15s}: mAP50 = {class_maps[idx]:.4f}")
+    if args.lr:
+        cmd.extend(['--lr', str(args.lr)])
+    elif 'lr' in orig_args:
+        cmd.extend(['--lr', str(orig_args['lr'])])
     
-    print("\n=== Training Continuation Complete ===")
-    print(f"Best model saved to: {best_model_path}")
+    if args.device:
+        cmd.extend(['--device', args.device])
+    elif 'device' in orig_args:
+        cmd.extend(['--device', orig_args['device']])
+    
+    # Add other arguments from checkpoint
+    if 'model' in orig_args:
+        cmd.extend(['--model', orig_args['model']])
+    
+    if 'num_workers' in orig_args:
+        cmd.extend(['--num-workers', str(orig_args['num_workers'])])
+    
+    if orig_args.get('mixed_precision', True):
+        cmd.append('--mixed-precision')
+    
+    if orig_args.get('use_tensorboard', True):
+        cmd.append('--use-tensorboard')
+    
+    if 'weight_decay' in orig_args:
+        cmd.extend(['--weight-decay', str(orig_args['weight_decay'])])
+    
+    if 'dropout' in orig_args:
+        cmd.extend(['--dropout', str(orig_args['dropout'])])
+    
+    if 'scheduler' in orig_args:
+        cmd.extend(['--scheduler', orig_args['scheduler']])
+    
+    # Print and run the command
+    print(f"Running command: {' '.join(cmd)}")
+    
+    try:
+        subprocess.run(cmd, check=True)
+        print("\nTraining completed successfully!")
+    except subprocess.CalledProcessError as e:
+        print(f"\nTraining failed with error code {e.returncode}")
+    except KeyboardInterrupt:
+        print("\nTraining interrupted. You can resume training later by running this script again.")
 
-if __name__ == "__main__":
-    main() 
+if __name__ == '__main__':
+    main()

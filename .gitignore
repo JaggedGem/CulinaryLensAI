@@ -1,6 +1,9 @@
 /.idea
-/.venv
+venv
 /runs
 /yolo11n.pt
 /yolov5s.pt
 /yolov5su.pt
+/food-101
+__pycache__
+example_images

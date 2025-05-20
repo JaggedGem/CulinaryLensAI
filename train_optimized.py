@@ -1,130 +1,252 @@
 import os
 import argparse
-from pathlib import Path
+import subprocess
+import sys
+import json
+import glob
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Food-101 Classification: Optimized Pipeline')
+    parser.add_argument('--data-dir', type=str, default='./food-101', help='Directory to store the dataset')
+    parser.add_argument('--batch-size', type=int, default=64, help='Batch size')
+    parser.add_argument('--epochs', type=int, default=50, help='Number of epochs')
+    parser.add_argument('--model', type=str, default='efficientnet_b0', 
+                        choices=['resnet18', 'resnet34', 'resnet50', 'densenet121', 'efficientnet_b0', 'efficientnet_b2'], 
+                        help='Model architecture')
+    parser.add_argument('--lr', type=float, default=3e-4, help='Learning rate')
+    parser.add_argument('--output-dir', type=str, default='./runs/food101', help='Output directory')
+    parser.add_argument('--num-workers', type=int, default=4, help='Number of workers for data loading')
+    parser.add_argument('--device', type=str, default='cuda', help='Device to use for training (cuda or cpu)')
+    parser.add_argument('--skip-dataset', action='store_true', help='Skip dataset preparation')
+    parser.add_argument('--skip-training', action='store_true', help='Skip model training')
+    parser.add_argument('--demo', action='store_true', help='Launch demo app after training')
+    parser.add_argument('--demo-port', type=int, default=7860, help='Port for demo app')
+    parser.add_argument('--share', action='store_true', help='Create a public link for the demo app')
+    parser.add_argument('--auto-resume', action='store_true', default=True, help='Automatically resume from the latest checkpoint')
+    parser.add_argument('--mixed-precision', action='store_true', default=True, help='Use mixed precision training')
+    parser.add_argument('--use-tensorboard', action='store_true', default=True, help='Use TensorBoard for logging')
+    
+    return parser.parse_args()
+
+def find_latest_checkpoint(output_dir):
+    """Find the latest checkpoint in the output directory"""
+    checkpoint_path = os.path.join(output_dir, 'latest_checkpoint.pth')
+    if os.path.exists(checkpoint_path):
+        return checkpoint_path
+    
+    # If no latest_checkpoint.pth, look for other checkpoints
+    checkpoints = glob.glob(os.path.join(output_dir, '*_checkpoint.pth'))
+    if checkpoints:
+        # Sort by modification time, most recent first
+        return sorted(checkpoints, key=os.path.getmtime, reverse=True)[0]
+    
+    return None
 
 def main():
-    """Main function to run the optimized training pipeline"""
-    parser = argparse.ArgumentParser(description="Optimized YOLOv5 training pipeline")
-    parser.add_argument('--balance', action='store_true', help='Balance the dataset before training')
-    parser.add_argument('--target-count', type=int, default=200, help='Target count for each class after balancing')
-    parser.add_argument('--epochs', type=int, default=300, help='Number of training epochs')
-    parser.add_argument('--batch-size', type=int, default=16, help='Batch size for training')
-    parser.add_argument('--img-size', type=int, default=640, help='Image size for training')
-    parser.add_argument('--model', type=str, default='auto', help='Model to use (yolov5s, yolov5m, yolov5l, yolov5x, or auto)')
-    args = parser.parse_args()
+    args = parse_args()
     
-    print("=== Optimized YOLOv5 Training Pipeline ===")
+    # First check if required packages are installed
+    try:
+        import torch
+        import torchvision
+        import tqdm
+        import matplotlib
+        import sklearn
+        
+        # Check CUDA availability after torch is imported
+        cuda_available = torch.cuda.is_available()
+        # Override device setting if CUDA is not available
+        if args.device == 'cuda' and not cuda_available:
+            print("CUDA is not available, falling back to CPU")
+            args.device = 'cpu'
+        elif cuda_available:
+            # Display CUDA information
+            print(f"CUDA is available: {cuda_available}")
+            print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+            print(f"CUDA version: {torch.version.cuda}")
     
-    # Step 1: Balance the dataset if requested
-    if args.balance:
-        print("\n=== Step 1: Balancing Dataset ===")
-        from balance_dataset import balance_dataset
-        data_yaml = balance_dataset(target_count=args.target_count)
-    else:
-        data_yaml = 'datase.v1i.yolov5-obb/dataset/data.yaml'
-    
-    # Step 2: Set up optimized hyperparameters
-    print("\n=== Step 2: Creating Optimized Hyperparameters ===")
-    from improved_training import create_hyp_file
-    hyp_file = create_hyp_file()
-    
-    # Step 3: Determine the best model to use
-    print("\n=== Step 3: Selecting Optimal Model ===")
-    if args.model == 'auto':
-        # Auto-select model based on available models
-        model_options = ['yolov5l.pt', 'yolov5m.pt', 'yolov5su.pt', 'yolov5s.pt']
-        for model_option in model_options:
-            if os.path.exists(model_option):
-                model_path = model_option
-                break
+        # Check additional optional requirements
+        if args.use_tensorboard:
+            try:
+                import tensorboard
+            except ImportError:
+                print("TensorBoard not found but continuing without it")
+                args.use_tensorboard = False
+                
+        if args.demo:
+            try:
+                import gradio
+            except ImportError:
+                print("Gradio not found. The demo will not run.")
+                args.demo = False
+                
+    except ImportError as e:
+        print(f"Missing requirement: {e}")
+        install = input("Would you like to install the missing requirements? (y/n): ")
+        if install.lower() == 'y':
+            subprocess.run([sys.executable, '-m', 'pip', 'install', 'torch', 'torchvision', 'tqdm', 'matplotlib', 'scikit-learn', 'tensorboard', 'gradio', 'pandas', 'seaborn'])
+            # Try importing again
+            print("Please restart the script after installation")
+            sys.exit(0)
         else:
-            model_path = 'yolov5m.pt'
-    else:
-        model_path = f"{args.model}.pt"
+            print("Please install the missing requirements and try again.")
+            sys.exit(1)
     
-    print(f"Selected model: {model_path}")
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
     
-    # Step 4: Train the model
-    print("\n=== Step 4: Training Model with Optimized Settings ===")
-    from ultralytics import YOLO
-    
-    model = YOLO(model_path)
-    
-    training_args = {
-        'data': data_yaml,
-        'hyp': hyp_file,
-        'epochs': args.epochs,
-        'patience': 50,
-        'imgsz': args.img_size,
-        'batch': args.batch_size,
-        'device': 0,
-        'workers': 8,
-        'optimizer': 'AdamW',
-        'cos_lr': True,
-        'label_smoothing': 0.1,
-        'project': 'runs/optimized',
-        'name': 'exp',
-        'exist_ok': True,
-        'pretrained': True,
-        'rect': False,
-        'multi_scale': True,
-        'sync_bn': True,
-        'verbose': True,
-        'seed': 0,
-        'deterministic': True,
+    # Prepare dataset
+    if not args.skip_dataset:
+        print("\n" + "="*50)
+        print("Step 1: Preparing Food-101 Dataset")
+        print("="*50)
         
-        # Advanced augmentation
-        'degrees': 0.5,
-        'translate': 0.2,
-        'scale': 0.7,
-        'shear': 0.2,
-        'perspective': 0.001,
-        'flipud': 0.5,
-        'fliplr': 0.5,
-        'mosaic': 0.8,
-        'mixup': 0.5,
-        'copy_paste': 0.3,
+        cmd = [sys.executable, 'prepare_food101.py', '--data-dir', args.data_dir]
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Dataset preparation failed with error code {e.returncode}")
+            sys.exit(1)
+    
+    # Check for resume checkpoint
+    resume_checkpoint = None
+    if args.auto_resume:
+        resume_checkpoint = find_latest_checkpoint(args.output_dir)
+        if resume_checkpoint:
+            print(f"Found checkpoint to resume training: {resume_checkpoint}")
+    
+    # Train model
+    if not args.skip_training:
+        print("\n" + "="*50)
+        print("Step 2: Training Model with Optimized Settings")
+        print("="*50)
         
-        # Class imbalance handling
-        'cls_pw': 1.0,
-        'obj_pw': 1.0,
-        'fl_gamma': 2.0,
-    }
+        cmd = [
+            sys.executable, 'improved_training.py',
+            '--data-dir', args.data_dir,
+            '--batch-size', str(args.batch_size),
+            '--epochs', str(args.epochs),
+            '--model', args.model,
+            '--lr', str(args.lr),
+            '--device', args.device,
+            '--output-dir', args.output_dir,
+            '--num-workers', str(args.num_workers),
+        ]
+        
+        # Add optional arguments
+        if args.mixed_precision:
+            cmd.append('--mixed-precision')
+        
+        if args.use_tensorboard:
+            cmd.append('--use-tensorboard')
+            
+        if args.auto_resume and resume_checkpoint:
+            cmd.extend(['--resume', resume_checkpoint])
+            
+        try:
+            print("Running training with command:", ' '.join(cmd))
+            process = subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Training failed with error code {e.returncode}")
+            # Even if training fails, we might have a checkpoint we can use
+            print("Checking for available checkpoints...")
+            checkpoint_path = find_latest_checkpoint(args.output_dir)
+            if checkpoint_path:
+                print(f"Found checkpoint at {checkpoint_path}")
+            else:
+                print("No checkpoint found, exiting.")
+                sys.exit(1)
+                
+        except KeyboardInterrupt:
+            print("\nTraining interrupted by user. The model checkpoint will be saved automatically.")
+            print("You can resume training by running the script again with --auto-resume")
+            # Don't exit, proceed to check if we have a model to use
     
-    print("Starting optimized training...")
-    results = model.train(**training_args)
+    # Check if the model exists
+    model_path = os.path.join(args.output_dir, 'best_model.pth')
+    if not os.path.exists(model_path):
+        model_path = os.path.join(args.output_dir, 'final_model.pth')
+        if not os.path.exists(model_path):
+            # Look for any checkpoint
+            model_path = find_latest_checkpoint(args.output_dir)
+            if not model_path:
+                print(f"No model found in {args.output_dir}")
+                if not args.skip_training:
+                    print("Training might have failed or been interrupted.")
+                return
     
-    print("Training completed!")
-    print(f"Results saved to {results.save_dir}")
+    # Check if class_names.json exists
+    class_names_path = os.path.join(args.output_dir, 'class_names.json')
+    if not os.path.exists(class_names_path):
+        print("Warning: class_names.json not found. Creating it from the dataset...")
+        try:
+            import torchvision.datasets as datasets
+            image_datasets = datasets.ImageFolder(os.path.join(args.data_dir, 'train'))
+            class_names = image_datasets.classes
+            with open(class_names_path, 'w') as f:
+                json.dump(class_names, f)
+            print(f"Created {class_names_path}")
+        except Exception as e:
+            print(f"Failed to create class_names.json: {e}")
+            print("Please ensure the dataset is prepared correctly.")
     
-    # Step 5: Evaluate the trained model
-    print("\n=== Step 5: Evaluating Model Performance ===")
-    best_model_path = os.path.join(results.save_dir, 'weights', 'best.pt')
+    # Display model information
+    print("\n" + "="*50)
+    print("Model Information")
+    print("="*50)
     
-    # Load best model for evaluation
-    best_model = YOLO(best_model_path)
+    # Try to load the model to get information
+    try:
+        checkpoint = torch.load(model_path, map_location='cpu')
+        if 'args' in checkpoint:
+            trained_args = checkpoint['args']
+            print(f"Model architecture: {trained_args.get('model', args.model)}")
+            print(f"Training epochs: {trained_args.get('epochs', 'unknown')}")
+            print(f"Batch size: {trained_args.get('batch_size', 'unknown')}")
+            if 'accuracy' in checkpoint:
+                print(f"Best validation accuracy: {checkpoint['accuracy']:.4f}")
+        else:
+            print(f"Model saved at: {model_path}")
+    except Exception as e:
+        print(f"Could not load model details: {e}")
     
-    # Evaluate on test set
-    eval_results = best_model.val(data=data_yaml, split='test')
+    print("\n" + "="*50)
+    print("Step 3: Model Inference")
+    print("="*50)
+    print(f"Model trained and saved to {model_path}")
+    print("You can now use the model to make predictions on new images:")
+    print(f"python food101_inference.py --image <path_to_image> --model-path {model_path} --class-names {args.output_dir}/class_names.json --model-type {args.model}")
     
-    print("\n=== Final Model Performance ===")
-    print(f"mAP50: {eval_results.box.map50:.4f}")
-    print(f"mAP50-95: {eval_results.box.map:.4f}")
-    
-    # Print per-class results
-    import yaml
-    with open(data_yaml, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    class_names = config['names']
-    maps = eval_results.box.maps
-    print("\nPer-class performance:")
-    for i, class_name in enumerate(class_names):
-        print(f"{class_name:15s}: mAP50 = {maps[i]:.4f}")
-    
-    print("\n=== Training Pipeline Complete ===")
-    print(f"Best model saved to: {best_model_path}")
-    print("Use this model for inference on new data.")
+    # Launch demo app if requested
+    if args.demo:
+        print("\n" + "="*50)
+        print("Step 4: Launching Demo App")
+        print("="*50)
+        
+        cmd = [
+            sys.executable, 'food101_demo_app.py',
+            '--model-path', model_path,
+            '--class-names', os.path.join(args.output_dir, 'class_names.json'),
+            '--model-type', args.model,
+            '--device', args.device,
+            '--port', str(args.demo_port)
+        ]
+        if args.share:
+            cmd.append('--share')
+        
+        try:
+            subprocess.run(cmd)
+        except KeyboardInterrupt:
+            print("Demo app closed by user.")
+        except Exception as e:
+            print(f"Error running demo app: {e}")
 
-if __name__ == "__main__":
-    main() 
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nProcess terminated by user.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        import traceback
+        traceback.print_exc()
